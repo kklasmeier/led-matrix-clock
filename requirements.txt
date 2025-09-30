@@ -1,0 +1,14 @@
+# Python Dependencies for LED Matrix Clock
+# Note: Install via apt on Raspberry Pi OS
+
+# Image processing (required)
+Pillow>=9.0.0
+# Install: sudo apt install python3-pil
+
+# HTTP requests (optional, improves RSS feed reliability)  
+requests>=2.28.0
+# Install: sudo apt install python3-requests
+
+# RGB Matrix Library (required, manual install)
+# Not available via pip - see README.md for installation instructions
+# Repository: https://github.com/hzeller/rpi-rgb-led-matrix
