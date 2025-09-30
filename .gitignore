@@ -1,0 +1,14 @@
+# Secrets and API keys
+secrets.json
+
+# Python
+*.pyc
+__pycache__/
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Lock file
+/tmp/led_clock.pid

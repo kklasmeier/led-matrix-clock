@@ -1,0 +1,538 @@
+# 64x64 LED Matrix Clock - Technical Documentation
+
+## Project Overview
+
+A Python-based information display system running on a Raspberry Pi Zero 2W, showing time, date, weather, stock market data, and scrolling news headlines on a 64x64 RGB LED matrix panel.
+
+**Status**: Fully operational and optimized for performance
+**Hardware**: Raspberry Pi Zero 2W + Adafruit RGB Matrix Bonnet + 64x64 HUB75 LED Panel
+**Location**: Wetherington, Ohio (39.35°N, -84.31°W)
+**Update Frequency**: Time (1s), Weather (15m), Stocks (6m during market hours), News (30m)
+
+---
+
+## System Architecture
+
+### Core Design Principles
+
+1. **Thread Safety**: Background data fetching never blocks the display rendering
+2. **Performance First**: Optimized rendering with static frame buffers and minimal redraws
+3. **Graceful Degradation**: System continues operating even if individual data sources fail
+4. **Single Instance**: Process lock prevents multiple instances from accessing GPIO pins
+
+### Threading Model
+
+```
+Main Thread (Display Loop)
+├─ Renders display at ~170 FPS
+├─ Swaps canvas buffers
+└─ Minimal sleep (3ms) to prevent CPU spinning
+
+Background Thread (Data Manager)
+├─ Weather updates (every 60s check, 15m actual update)
+├─ Stock updates (every 6m during market hours)
+├─ News updates (every 30m)
+└─ Non-blocking cache access via locks
+```
+
+### Directory Structure
+
+```
+clock64/
+├── main.py                    # Entry point, main render loop
+├── config.py                  # Layout constants, colors, hardware settings
+├── secrets.json               # API keys and location (NOT in git)
+├── secrets.example.json       # Template for secrets.json (in git)
+├── fonts/
+│   ├── font_manager.py        # Font loading system
+│   ├── bitmap_font.py         # Custom bitmap font renderer
+│   ├── tiny64_font.txt        # Small text font (3x5 pixels)
+│   └── clock64_font.txt       # Large digit font (9x15 pixels)
+├── display/
+│   ├── matrix.py              # LED matrix hardware initialization
+│   ├── renderer.py            # PIL image to canvas rendering
+│   └── headline_scroller.py   # Strip-based scrolling system
+├── data/
+│   ├── time_provider.py       # System time/date
+│   ├── weather_provider.py    # Open-Meteo API integration
+│   ├── stock_provider.py      # Financial Modeling Prep API
+│   ├── news_provider.py       # RSS feed aggregation
+│   └── data_manager.py        # Threaded data coordination
+└── utils/
+    └── process_lock.py        # Single-instance enforcement
+```
+
+---
+
+## Display Layout (64x64 pixels)
+
+```
+Row  0-2:   [blank space]
+Row  3-14:  Date section (centered, cyan)
+Row 11-12:  Horizontal divider (dim white)
+Row 17-29:  Time (left, red) + AM/PM (right, red)
+Row 36-37:  Horizontal divider (dim white)
+Row 40-51:  Weather (left) | Stocks (right)
+            Vertical divider at x=31-32
+Row 54:     Horizontal divider (dim white)
+Row 56-63:  Scrolling news headlines (yellow)
+```
+
+### Layout Details
+
+**Date Section**: "Mon Sep 29 2025" - centered horizontally
+**Time Section**: Large clock digits at x=2, AM/PM indicator at x=53
+**Weather Section**: 
+- Starts at x=1 (shifted right 1 pixel)
+- "H86" at left, "L57" right-aligned with 1px gap before divider
+- "Now" at left, "85" right-aligned with 1px gap before divider
+**Stocks Section**: Labels left-aligned at x=34, values right-aligned at x=62
+**Headlines**: Continuous horizontal scroll, 1 pixel per frame
+
+---
+
+## Configuration Files
+
+### secrets.json (NOT in version control)
+
+```json
+{
+  "STOCK_API_KEY": "your_api_key_here",
+  "LATITUDE": 39.35,
+  "LONGITUDE": -84.31
+}
+```
+
+**Purpose**: Stores sensitive API keys and location data
+**Access**: Read by `stock_provider.py` and `weather_provider.py` via `load_secrets()` function
+**Git**: Listed in `.gitignore` to prevent accidental commits
+
+### config.py
+
+Contains all display layout constants, colors, update intervals, and hardware settings.
+**Key sections**: Colors, Layout, Fonts, UpdateIntervals, Hardware
+
+---
+
+## Data Providers
+
+### Time Provider (`time_provider.py`)
+- **Source**: System time via Python's `datetime`
+- **Format**: 12-hour time without leading zeros ("10:47" not "010:47")
+- **Update**: Every call returns fresh data (time changes every second)
+- **No API**: Local system time only
+
+### Weather Provider (`weather_provider.py`)
+- **API**: Open-Meteo (free, no key required)
+- **Data**: Current temp, daily high/low in Fahrenheit
+- **Location**: Read from `secrets.json` (LATITUDE, LONGITUDE)
+- **Update**: Every 15 minutes (900s interval)
+- **Cache**: Returns cached data between updates
+- **Fallback**: Default temps (70°F current, 75°F high, 65°F low) if API fails
+
+### Stock Provider (`stock_provider.py`)
+- **API**: Financial Modeling Prep (requires API key)
+- **Symbols**: DOW (^DJI), S&P 500 (^GSPC) - NASDAQ removed (not displayed)
+- **Update Logic**:
+  - Startup: Immediate fetch regardless of market hours
+  - Market hours (9:15 AM - 4:15 PM ET, weekdays): Every 6 minutes
+  - Outside hours: No updates (prevents wasted API calls)
+- **Display**: Shows change value with green (positive) or red (negative) coloring
+- **Fallback**: Default values if API fails (DOW+25, S&P+2)
+
+### News Provider (`news_provider.py`)
+- **Sources**: RSS feeds from 6 conservative news outlets
+  - Fox News, Breitbart, NY Post, The Blaze, Washington Examiner
+  - Daily Wire (frequent XML parse errors, kept for when it works)
+  - Newsmax (removed due to persistent timeout issues)
+- **Method**: 
+  - urllib.request for most feeds (standard library)
+  - requests library fallback if available
+  - subprocess curl for problematic sites (currently disabled)
+- **Processing**:
+  - Strips CDATA markers from titles
+  - Unescapes HTML entities
+  - Truncates headlines >200 characters
+  - Collects up to 50 headlines per source
+  - Maximum 200 total headlines
+- **Update**: Every 30 minutes (1800s interval)
+- **Timeout**: 15 seconds per feed
+
+---
+
+## Rendering System
+
+### Performance Optimizations
+
+1. **Static Frame Buffer**: 
+   - Date, time, weather, and stocks rendered once to PIL Image
+   - Only rebuilt when data changes (not every frame)
+   - Saves ~75% of rendering work
+
+2. **Strip-Based Scrolling**:
+   - All headlines pre-rendered into one wide PIL Image "strip"
+   - Scrolling = slicing different 64px viewport from strip
+   - No per-frame text rendering needed
+   - Handles wrap-around automatically
+
+3. **Image Caching**:
+   - Rendered text images cached by content
+   - Cache keys like "time_10:47", "weather_high_H86"
+   - Avoids re-rendering identical text
+
+4. **SetImage Optimization**:
+   - Uses rgbmatrix's `SetImage()` for bulk pixel transfer
+   - Much faster than individual `SetPixel()` calls
+   - Complete 64x64 frame transferred in one operation
+
+### Frame Rate
+
+- **Target**: ~170 FPS main loop
+- **Scroll Speed**: 1 pixel every 4 frames = ~42 pixels/second
+- **CPU Load**: ~1.5 cores on Pi Zero 2W (4 cores total)
+- **Display Updates**: Only when content changes or scroll advances
+
+---
+
+## Critical Implementation Details
+
+### Process Lock (`utils/process_lock.py`)
+
+**Purpose**: Prevent multiple instances from accessing GPIO pins simultaneously
+**Mechanism**: PID file at `/tmp/led_clock.pid`
+**Behavior**:
+- Checks if PID file exists
+- If exists, verifies process is actually running
+- Removes stale lock files (process not running)
+- Creates lock file with current PID on successful acquisition
+- Auto-releases on normal exit via `atexit` handler
+
+**Manual Cleanup**: If crash leaves stale lock:
+```bash
+rm /tmp/led_clock.pid
+# or
+~/clock64/cleanup_lock.sh
+```
+
+### Market Hours Logic
+
+Stock provider implements smart update logic:
+- **Market Hours**: 9:15 AM - 4:15 PM Eastern Time, Monday-Friday
+- **Weekend Check**: Skips weekends (Saturday=5, Sunday=6)
+- **Update Rate**: 6 minutes during market hours, no updates outside hours
+- **Startup Exception**: Always fetches on first run regardless of time
+
+### Weather Alignment
+
+Weather values are **right-aligned** with 1-pixel gap before vertical divider:
+- Divider at x=31
+- Values end at x=30
+- Calculation: `x = 30 - text_width`
+- Applied to "L57" (low temp) and "85" (current temp)
+
+### Headline Scrolling
+
+**Strip Architecture**:
+- All headlines concatenated with " • " separator into one PIL Image
+- Strip width = sum of all headline widths + separator widths + buffer
+- Current viewport = 64-pixel slice starting at `scroll_x`
+- Wrap-around handled by compositing end + beginning of strip
+- Buffer space at end before loop (2x display width = 128px)
+
+**Smooth Transitions**:
+- New headlines **appended** to existing strip (not replaced)
+- Prevents jarring cuts when news updates
+- Old content scrolls off naturally before new content appears
+
+---
+
+## API Integration
+
+### Stock API (Financial Modeling Prep)
+
+**Endpoint**: `https://financialmodelingprep.com/stable/quote-short`
+**Authentication**: API key in query parameter
+**Rate Limits**: Unknown, but optimized to ~10 calls/hour during market hours
+**Response Format**: JSON array with `change` field (float)
+
+**Configuration**:
+```python
+self.symbols = {
+    "^DJI": "DOW",
+    "^GSPC": "S&P"
+}
+```
+
+### Weather API (Open-Meteo)
+
+**Endpoint**: `https://api.open-meteo.com/v1/forecast`
+**Parameters**: latitude, longitude, current_weather=true, temperature_unit=fahrenheit
+**Authentication**: None required (free tier)
+**Rate Limits**: Generous, 15-minute updates well within limits
+
+**Example URL**:
+```
+https://api.open-meteo.com/v1/forecast?latitude=39.35&longitude=-84.31&current_weather=true&daily=temperature_2m_max,temperature_2m_min&timezone=auto&temperature_unit=fahrenheit
+```
+
+### News RSS Feeds
+
+All use standard RSS 2.0 format with `<item>` elements containing `<title>`.
+**User-Agent Required**: Some feeds return 403 without proper User-Agent header
+**Timeout Issues**: Some feeds (Newsmax, Daily Wire) have reliability problems
+**CDATA Handling**: Titles often wrapped in `<![CDATA[...]]>` requiring cleanup
+
+---
+
+## Known Issues and Workarounds
+
+### Issue: Newsmax RSS Timeout
+**Problem**: Feed times out after 30 seconds from Python urllib and requests
+**Curl Works**: Manual curl succeeds instantly, subprocess curl from Python times out
+**Current Status**: Removed from sources list
+**Potential Solutions**: Network contention, anti-bot detection, rate limiting
+
+### Issue: Daily Wire XML Parse Errors
+**Problem**: "mismatched tag: line 9, column 3" error
+**Cause**: Malformed XML on their server side
+**Impact**: 0 headlines fetched from Daily Wire
+**Mitigation**: Keep in sources list, works intermittently when feed is valid
+
+### Issue: High CPU Usage During Scrolling
+**Status**: RESOLVED via strip-based scrolling
+**Previous**: ~300% CPU from per-frame text rendering
+**Current**: ~150% CPU, mostly display swapping and headline advancement
+
+---
+
+## Startup and Shutdown
+
+### Starting the Clock
+
+```bash
+cd ~/clock64
+python3 main.py
+```
+
+**Startup Sequence**:
+1. Process lock acquisition (fails if already running)
+2. Matrix hardware initialization (GPIO setup)
+3. Font loading (tiny64_font, clock64_font)
+4. Data manager start (background thread begins)
+5. Initial data fetch (weather, stocks, news)
+6. Main render loop starts
+
+### Stopping the Clock
+
+**Normal Shutdown**: Ctrl+C (SIGINT)
+**Cleanup Steps**:
+1. Signal handler sets `self.running = False`
+2. Main loop exits gracefully
+3. Background threads stopped
+4. Matrix display cleared
+5. Process lock released
+
+**Forced Cleanup** (if crashed):
+```bash
+rm /tmp/led_clock.pid
+# or use the cleanup script
+~/clock64/cleanup_lock.sh
+```
+
+---
+
+## Performance Characteristics
+
+### Measured Performance (Raspberry Pi Zero 2W)
+
+- **Main Loop**: 170-175 FPS
+- **Display Updates**: 25-26% of loops (scroll frames + data changes)
+- **CPU Usage**: 1.5-1.7 cores (37-42% of 4 cores)
+- **Memory**: ~150 MB RSS
+- **Network**: Minimal (APIs every 6-30 minutes)
+
+### Optimization History
+
+1. **Original**: Per-frame text rendering → 300% CPU
+2. **PIL Optimization**: Static frame buffer → 200% CPU
+3. **Strip Scrolling**: Pre-rendered headlines → 150% CPU
+4. **Image Caching**: Cached text images → current performance
+
+---
+
+## Development Guidelines
+
+### Adding New Data Sources
+
+1. Create new provider in `data/` (e.g., `crypto_provider.py`)
+2. Implement standard interface:
+   - `__init__()`: Setup, load secrets if needed
+   - `get_data()`: Returns dict with formatted display strings
+   - `is_stale()`: Check if cache needs refresh
+   - `fetch_X_data()`: Actual API call
+3. Add to `data_manager.py`:
+   - Initialize provider
+   - Add update interval
+   - Add fetch method to background loop
+   - Add to `get_current_data()` return dict
+4. Update `renderer.py` to display new data
+5. Adjust `config.py` layout if needed
+
+### Modifying Layout
+
+All layout changes in `config.py` → `Layout` class:
+- Row positions (Y coordinates)
+- Column positions (X coordinates)
+- Section heights and widths
+- Divider positions
+
+After layout changes, update rendering logic in `renderer.py`:
+- `rebuild_static_frame_buffer()` for static content
+- `render_frame_as_image()` for dynamic content
+
+### Adding New Fonts
+
+1. Create bitmap font file in `fonts/` directory
+2. Format: `character,row1,row2,...,rowN`
+3. Each row: string of 0s and 1s (0=off, 1=on)
+4. Update `font_manager.py` to recognize new font name
+5. Add constant to `config.py` → `Fonts` class
+
+---
+
+## Troubleshooting
+
+### Display Not Working
+
+1. Check GPIO connections (HUB75 pinout)
+2. Verify power supply (5V 10A minimum)
+3. Check `Hardware.GPIO_SLOWDOWN` value (try 2-4)
+4. Verify matrix library installed: `/home/pi/rpi-rgb-led-matrix/`
+
+### "Another instance is already running"
+
+```bash
+# Check if process actually running
+ps aux | grep main.py
+
+# Remove stale lock if not running
+rm /tmp/led_clock.pid
+```
+
+### API Data Not Updating
+
+1. Check `secrets.json` exists and has valid keys
+2. Test API manually: `curl <api_url>`
+3. Check data_manager logs for error messages
+4. Verify internet connectivity
+5. Check update intervals in background thread
+
+### High CPU Usage
+
+Normal: ~150% (1.5 cores)
+High: >200% 
+
+Causes:
+- Too-fast scroll (reduce `scroll_every_n_frames`)
+- No sleep in main loop (verify `time.sleep(0.003)`)
+- Static buffer not caching (check `check_static_content_changed()`)
+
+### RSS Feeds Failing
+
+1. Test feed URL in browser
+2. Check feed returns valid XML
+3. Increase timeout if needed (currently 15s)
+4. Remove problematic feeds from `news_provider.py`
+5. Check User-Agent header requirement
+
+---
+
+## Future Enhancement Ideas
+
+### Potential Features
+
+- **Weather Radar**: Display precipitation forecast
+- **Calendar Integration**: Show upcoming events
+- **Crypto Prices**: Bitcoin, Ethereum tracking
+- **Sports Scores**: Live game updates
+- **Transit Info**: Bus/train arrival times
+- **Custom Messages**: Display user-defined text
+- **Web Interface**: Remote control and configuration
+- **Brightness Control**: Auto-adjust by time of day
+- **Multiple Themes**: Different color schemes
+- **Animated Transitions**: Smooth data change effects
+
+### Architecture Improvements
+
+- **Plugin System**: Modular data provider architecture
+- **Configuration UI**: Web-based settings editor
+- **Database Logging**: Track data history
+- **Error Recovery**: Auto-restart on crashes
+- **Update Mechanism**: OTA firmware updates
+- **Health Monitoring**: System metrics display
+
+---
+
+## Dependencies
+
+### Python Standard Library
+- `time`, `datetime`: Time handling
+- `threading`: Background data fetching
+- `queue`: Thread communication (unused currently)
+- `signal`: Graceful shutdown handling
+- `json`: API response parsing, secrets file
+- `urllib.request`: HTTP requests for APIs
+- `xml.etree.ElementTree`: RSS feed parsing
+- `html`: HTML entity unescaping
+- `subprocess`: Shell command execution
+- `os`, `sys`: System operations
+
+### Third-Party Libraries
+- `PIL` (Pillow): Image creation and manipulation
+- `rgbmatrix`: Adafruit RGB LED matrix library
+- `requests`: HTTP client (optional, for problematic feeds)
+
+### System Dependencies
+- `rpi-rgb-led-matrix`: C++ library for LED control
+  - Location: `/home/pi/rpi-rgb-led-matrix/`
+  - Python bindings in `bindings/python/`
+
+---
+
+## Version Control
+
+### Git Repository Structure
+
+```
+.gitignore:
+  secrets.json      # API keys
+  *.pyc             # Python bytecode
+  __pycache__/      # Python cache
+  .DS_Store         # macOS files
+  /tmp/led_clock.pid # Lock file
+
+Tracked Files:
+  secrets.example.json  # Template for secrets
+  All .py files
+  Font data files (.txt)
+  README.md
+  This documentation
+```
+
+### Commit Guidelines
+
+- Document API changes in commit messages
+- Note performance impacts
+- Reference issue numbers if applicable
+- Keep commits focused and atomic
+
+---
+
+## Contact and Maintenance
+
+**Hardware**: Raspberry Pi Zero 2W (4 cores, 512MB RAM)
+**OS**: Raspberry Pi OS (Debian-based)
+**Python**: Python 3.x
+**Project Path**: `~/Clock/`
+
+**For AI Assistants**: This document provides complete context for maintaining and extending the LED matrix clock project. All architectural decisions, known issues, and implementation details are documented here.
