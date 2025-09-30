@@ -12,3 +12,7 @@ __pycache__/
 
 # Lock file
 /tmp/led_clock.pid
+
+# Log files
+logs/
+*.log
