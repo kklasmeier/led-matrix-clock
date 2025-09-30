@@ -4,6 +4,8 @@ import time
 import urllib.request
 import subprocess
 import xml.etree.ElementTree as ET
+from urllib import request as urllib_request
+from urllib import error as urllib_error
 from typing import Dict, Any, List, Optional, Tuple
 from html import unescape
 
@@ -23,10 +25,10 @@ class NewsProvider:
         # Newsmax uses curl due to compatibility issues with Python requests
         # Placed first to avoid network contention issues
         self.rss_sources = [
-            ("Newsmax", "https://www.newsmax.com/rss/Newsfront/16/"),
+#            ("Newsmax", "https://www.newsmax.com/rss/Newsfront/16/"),
             ("Fox News", "https://feeds.foxnews.com/foxnews/latest"),
             ("Breitbart", "https://feeds.feedburner.com/breitbart"),
-            ("Daily Wire", "https://www.dailywire.com/rss.xml"),
+#            ("Daily Wire", "https://www.dailywire.com/rss.xml"),
             ("NY Post", "https://nypost.com/news/feed/"),
             ("The Blaze", "https://www.theblaze.com/feeds/feed.rss"),
             ("Washington Examiner", "https://www.washingtonexaminer.com/feed")
@@ -140,7 +142,7 @@ class NewsProvider:
             
             return headlines, len(headlines)
             
-        except urllib.error.URLError as e:
+        except urllib_error.URLError as e:
             if hasattr(e, 'reason'):
                 print(f"Error fetching RSS from {source_name}: {e.reason}")
             else:

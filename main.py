@@ -165,12 +165,12 @@ class LEDClock:
                         print(f"Display updated: {time_data['time']} {time_data['ampm']} | {weather_str} | {dow_str} | News: {news_count} headlines")
                 
                 # Performance logging every 125 loops with actual timing
-                if loop_count % 125 == 0:
-                    elapsed = current_time - start_time
-                    actual_fps = loop_count / elapsed if elapsed > 0 else 0
-                    update_rate = (update_count / loop_count) * 100 if loop_count > 0 else 0
-                    scroll_fps = actual_fps * (update_count / loop_count) if loop_count > 0 else 0
-                    print(f"DEBUG [{time.strftime('%H:%M:%S')}]: Loop {loop_count} | Updates: {update_count} ({update_rate:.1f}%) | Elapsed: {elapsed:.1f}s | Actual FPS: {actual_fps:.1f} | Scroll: ~{scroll_fps:.1f} px/s | Running: {self.running}")
+#                if loop_count % 125 == 0:
+#                    elapsed = current_time - start_time
+#                    actual_fps = loop_count / elapsed if elapsed > 0 else 0
+#                    update_rate = (update_count / loop_count) * 100 if loop_count > 0 else 0
+#                    scroll_fps = actual_fps * (update_count / loop_count) if loop_count > 0 else 0
+#                    print(f"DEBUG [{time.strftime('%H:%M:%S')}]: Loop {loop_count} | Updates: {update_count} ({update_rate:.1f}%) | Elapsed: {elapsed:.1f}s | Actual FPS: {actual_fps:.1f} | Scroll: ~{scroll_fps:.1f} px/s | Running: {self.running}")
                 
                 # Minimal sleep to prevent CPU spinning
                 time.sleep(0.003)

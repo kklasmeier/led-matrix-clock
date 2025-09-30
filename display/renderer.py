@@ -155,56 +155,78 @@ class OptimizedDisplayRenderer:
         target.paste(colored_text, (x, y))
     
     def render_weather(self, frame: Image.Image, weather_data: Dict[str, Any]) -> None:
-        """Render weather information with right-aligned values"""
-        high_low_text = weather_data.get("high_low_text", "H-- L--")
-        current_text = weather_data.get("current_text", "Now --")
-        
-        # Split high_low_text into "H##" and "L##" parts
-        parts = high_low_text.split()
-        if len(parts) == 2:
-            high_part = parts[0]  # e.g., "H86"
-            low_part = parts[1]   # e.g., "L57"
+            """Render weather information with color-coded temperatures"""
+            high_low_text = weather_data.get("high_low_text", "H-- L--")
+            current_text = weather_data.get("current_text", "Now --")
             
-            # Render high temperature at the start position
-            high_image = self.get_text_image(high_part, Fonts.TINY_FONT, f"weather_high_{high_part}")
-            if high_image:
-                self.paste_colored_text(frame, high_image, Layout.WEATHER_START_X, Layout.WEATHER_START_Y, Colors.BLUE)
+            # Split high_low_text into parts: "H86 L57"
+            parts = high_low_text.split()
+            if len(parts) == 2:
+                high_part = parts[0]  # e.g., "H86"
+                low_part = parts[1]   # e.g., "L57"
+                
+                # Split "H86" into "H" and "86"
+                if len(high_part) > 1:
+                    high_label = high_part[0]  # "H"
+                    high_value = high_part[1:]  # "86"
+                    
+                    # Render "H" in white
+                    h_image = self.get_text_image(high_label, Fonts.TINY_FONT, f"weather_h_{high_label}")
+                    if h_image:
+                        self.paste_colored_text(frame, h_image, Layout.WEATHER_START_X, Layout.WEATHER_START_Y, Colors.WHITE)
+                    
+                    # Render "86" in orange, positioned after "H"
+                    high_value_image = self.get_text_image(high_value, Fonts.TINY_FONT, f"weather_high_{high_value}")
+                    if high_value_image and h_image:
+                        high_x = Layout.WEATHER_START_X + h_image.width + 1
+                        self.paste_colored_text(frame, high_value_image, high_x, Layout.WEATHER_START_Y, Colors.ORANGE)
+                
+                # Split "L57" into "L" and "57"
+                if len(low_part) > 1:
+                    low_label = low_part[0]  # "L"
+                    low_value = low_part[1:]  # "57"
+                    
+                    # Render low value in blue
+                    low_value_image = self.get_text_image(low_value, Fonts.TINY_FONT, f"weather_low_{low_value}")
+                    if low_value_image:
+                        # Right align: divider is at x=31, we want 1 pixel gap, so end at x=30
+                        low_x = 30 - low_value_image.width
+                        self.paste_colored_text(frame, low_value_image, low_x, Layout.WEATHER_START_Y, Colors.BLUE)
+                        
+                        # Render "L" in white, positioned before the value
+                        l_image = self.get_text_image(low_label, Fonts.TINY_FONT, f"weather_l_{low_label}")
+                        if l_image:
+                            l_x = low_x - l_image.width - 1
+                            self.paste_colored_text(frame, l_image, l_x, Layout.WEATHER_START_Y, Colors.WHITE)
+            else:
+                # Fallback: render the whole string at start position
+                high_low_image = self.get_text_image(high_low_text, Fonts.TINY_FONT, f"weather_hl_{high_low_text}")
+                if high_low_image:
+                    self.paste_colored_text(frame, high_low_image, Layout.WEATHER_START_X, Layout.WEATHER_START_Y, Colors.BLUE)
             
-            # Render low temperature flush right (1 pixel gap before vertical divider at x=31)
-            low_image = self.get_text_image(low_part, Fonts.TINY_FONT, f"weather_low_{low_part}")
-            if low_image:
-                # Right align: divider is at x=31, we want 1 pixel gap, so end at x=30
-                low_x = 30 - low_image.width
-                self.paste_colored_text(frame, low_image, low_x, Layout.WEATHER_START_Y, Colors.BLUE)
-        else:
-            # Fallback: render the whole string at start position
-            high_low_image = self.get_text_image(high_low_text, Fonts.TINY_FONT, f"weather_hl_{high_low_text}")
-            if high_low_image:
-                self.paste_colored_text(frame, high_low_image, Layout.WEATHER_START_X, Layout.WEATHER_START_Y, Colors.BLUE)
-        
-        # Split current_text into "Now" and "##" parts
-        current_parts = current_text.split()
-        if len(current_parts) == 2:
-            now_label = current_parts[0]  # "Now"
-            now_value = current_parts[1]  # e.g., "85"
-            
-            # Render "Now" label at start position
-            now_label_image = self.get_text_image(now_label, Fonts.TINY_FONT, f"weather_now_{now_label}")
-            if now_label_image:
-                self.paste_colored_text(frame, now_label_image, Layout.WEATHER_START_X, Layout.WEATHER_START_Y + 7, Colors.CYAN)
-            
-            # Render temperature value flush right (1 pixel gap before vertical divider)
-            now_value_image = self.get_text_image(now_value, Fonts.TINY_FONT, f"weather_value_{now_value}")
-            if now_value_image:
-                # Right align: divider is at x=31, we want 1 pixel gap, so end at x=30
-                value_x = 30 - now_value_image.width
-                self.paste_colored_text(frame, now_value_image, value_x, Layout.WEATHER_START_Y + 7, Colors.CYAN)
-        else:
-            # Fallback: render the whole string at start position
-            current_image = self.get_text_image(current_text, Fonts.TINY_FONT, f"weather_cur_{current_text}")
-            if current_image:
-                self.paste_colored_text(frame, current_image, Layout.WEATHER_START_X, Layout.WEATHER_START_Y + 7, Colors.CYAN)
-    
+            # Split current_text into "Now" and "##" parts
+            current_parts = current_text.split()
+            if len(current_parts) == 2:
+                now_label = current_parts[0]  # "Now"
+                now_value = current_parts[1]  # e.g., "85"
+                
+                # Render "Now" label at start position in cyan
+                now_label_image = self.get_text_image(now_label, Fonts.TINY_FONT, f"weather_now_{now_label}")
+                if now_label_image:
+                    self.paste_colored_text(frame, now_label_image, Layout.WEATHER_START_X, Layout.WEATHER_START_Y + 7, Colors.CYAN)
+                
+                # Render temperature value flush right in cyan
+                now_value_image = self.get_text_image(now_value, Fonts.TINY_FONT, f"weather_value_{now_value}")
+                if now_value_image:
+                    # Right align: divider is at x=31, we want 1 pixel gap, so end at x=30
+                    value_x = 30 - now_value_image.width
+                    self.paste_colored_text(frame, now_value_image, value_x, Layout.WEATHER_START_Y + 7, Colors.CYAN)
+            else:
+                # Fallback: render the whole string at start position
+                current_image = self.get_text_image(current_text, Fonts.TINY_FONT, f"weather_cur_{current_text}")
+                if current_image:
+                    self.paste_colored_text(frame, current_image, Layout.WEATHER_START_X, Layout.WEATHER_START_Y + 7, Colors.CYAN)
+
     def rebuild_static_frame_buffer(self, time_data: Dict[str, Any], 
                                    weather_data: Dict[str, Any], 
                                    stock_data: Dict[str, Any]) -> None:
