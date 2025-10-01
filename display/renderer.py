@@ -213,7 +213,7 @@ class OptimizedDisplayRenderer:
                 # Render "Now" label at start position in cyan
                 now_label_image = self.get_text_image(now_label, Fonts.TINY_FONT, f"weather_now_{now_label}")
                 if now_label_image:
-                    self.paste_colored_text(frame, now_label_image, Layout.WEATHER_START_X, Layout.WEATHER_START_Y + 7, Colors.CYAN)
+                    self.paste_colored_text(frame, now_label_image, Layout.WEATHER_START_X, Layout.WEATHER_START_Y + 7, Colors.WHITE)
                 
                 # Render temperature value flush right in cyan
                 now_value_image = self.get_text_image(now_value, Fonts.TINY_FONT, f"weather_value_{now_value}")
