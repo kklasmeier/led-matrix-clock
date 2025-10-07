@@ -1,4 +1,4 @@
-# display/headline_scroller.py - Optimized strip-based scrolling headlines
+# display/headline_scroller.py - Optimized strip-based scrolling with block tracking
 
 from typing import List, Optional, Dict, Any, Tuple
 from PIL import Image
@@ -7,7 +7,7 @@ from fonts.font_manager import get_font_manager
 from fonts.bitmap_font import BitmapFontAdapter
 
 class OptimizedHeadlineScroller:
-    """Strip-based headline scroller for maximum performance"""
+    """Strip-based headline scroller with block-based memory management"""
     
     def __init__(self, display_width: int = 64):
         """
@@ -27,6 +27,9 @@ class OptimizedHeadlineScroller:
         # Headline management
         self.current_headlines: List[str] = []
         self.last_headlines_hash: Optional[str] = None
+        
+        # NEW: Block tracking for memory management
+        self.blocks: List[Dict[str, Any]] = []  # List of {start_pixel, end_pixel, headline_count}
         
         # Font setup
         font_manager = get_font_manager()
@@ -64,6 +67,7 @@ class OptimizedHeadlineScroller:
             # Create minimal empty strip
             self.headline_strip = Image.new('RGB', (self.display_width, Layout.HEADLINES_HEIGHT), (0, 0, 0))
             self.strip_width = self.display_width
+            self.blocks = []
             return
         
         # Calculate total width needed
@@ -126,7 +130,14 @@ class OptimizedHeadlineScroller:
         self.strip_width = total_width
         self.current_headlines = headlines.copy()
         
-        print(f"Built headline strip: {len(headlines)} headlines, {total_width} pixels wide")
+        # NEW: Initialize blocks list with first block
+        self.blocks = [{
+            'start_pixel': 0,
+            'end_pixel': total_width,
+            'headline_count': len(headlines)
+        }]
+        
+        print(f"Built headline strip: {len(headlines)} headlines, {total_width} pixels wide (Block 0)")
     
     def update_headlines(self, headlines: List[str]) -> None:
         """
@@ -147,7 +158,7 @@ class OptimizedHeadlineScroller:
         self._append_headlines_to_strip(headlines)
         self.last_headlines_hash = headlines_hash
         
-        print(f"Updated headlines: {len(headlines)} new headlines appended")
+        print(f"Updated headlines: {len(headlines)} new headlines appended as Block {len(self.blocks) - 1}")
     
     def _append_headlines_to_strip(self, new_headlines: List[str]) -> None:
         """
@@ -179,6 +190,9 @@ class OptimizedHeadlineScroller:
         
         if not new_headline_images:
             return  # Nothing to append
+        
+        # NEW: Record where this block starts
+        block_start = self.strip_width
         
         # Create extended strip
         extended_width = self.strip_width + new_width
@@ -215,6 +229,59 @@ class OptimizedHeadlineScroller:
         self.headline_strip = extended_strip
         self.strip_width = extended_width
         self.current_headlines.extend(new_headlines)
+        
+        # NEW: Record this as a new block
+        self.blocks.append({
+            'start_pixel': block_start,
+            'end_pixel': extended_width,
+            'headline_count': len(new_headlines)
+        })
+    
+    def trim_scrolled_blocks(self) -> None:
+        """
+        Trim any headline blocks that have completely scrolled past.
+        Only removes entire blocks, never partial blocks.
+        Always keeps at least one block (the current one).
+        """
+        if not self.blocks or len(self.blocks) <= 1:
+            return  # Keep at least one block
+        
+        # Find blocks that are completely behind scroll_x
+        blocks_to_trim = []
+        for block in self.blocks[:-1]:  # Never consider the last block for trimming
+            if self.scroll_x > block['end_pixel']:
+                blocks_to_trim.append(block)
+            else:
+                break  # Stop at first block we haven't fully scrolled past
+        
+        if not blocks_to_trim:
+            return  # Nothing to trim
+        
+        # Calculate how much to trim (up to the end of the last fully-scrolled block)
+        trim_amount = blocks_to_trim[-1]['end_pixel']
+        
+        # Crop the strip
+        if self.headline_strip is not None:
+            new_strip = self.headline_strip.crop((
+                trim_amount, 0,
+                self.strip_width, Layout.HEADLINES_HEIGHT
+            ))
+            
+            # Update tracking
+            self.headline_strip = new_strip
+            self.strip_width = new_strip.width
+            self.scroll_x -= trim_amount
+        else:
+            return
+        
+        # Remove trimmed blocks and adjust remaining block positions
+        self.blocks = self.blocks[len(blocks_to_trim):]
+        for block in self.blocks:
+            block['start_pixel'] -= trim_amount
+            block['end_pixel'] -= trim_amount
+        
+        total_headlines_trimmed = sum(b['headline_count'] for b in blocks_to_trim)
+        print(f"Trimmed {len(blocks_to_trim)} block(s): {total_headlines_trimmed} headlines, {trim_amount} pixels removed")
     
     def get_display_slice(self) -> Image.Image:
         """
@@ -276,6 +343,11 @@ class OptimizedHeadlineScroller:
         # Handle wrap-around
         if self.scroll_x >= self.strip_width:
             self.scroll_x = self.scroll_x % self.strip_width
+        
+        # NEW: Trim old blocks periodically (check every ~1000 pixels scrolled)
+        # This runs about once per complete cycle through a block of headlines
+        if self.scroll_x % 1000 < self.scroll_speed:
+            self.trim_scrolled_blocks()
     
     def set_scroll_speed(self, speed: int) -> None:
         """
@@ -294,34 +366,8 @@ class OptimizedHeadlineScroller:
             Info string about current state
         """
         headline_count = len(self.current_headlines)
-        return f"{headline_count} headlines, {self.strip_width}px strip, offset {self.scroll_x}"
-    
-    def trim_old_content(self, keep_pixels: int = None) -> None:
-        """
-        Remove scrolled-off content to prevent infinite growth
-        
-        Args:
-            keep_pixels: How many pixels to keep behind current position
-        """
-        if not self.headline_strip or not keep_pixels:
-            return
-        
-        # Only trim if we have scrolled significantly
-        if self.scroll_x > keep_pixels * 2:
-            # Create new strip starting from current position minus buffer
-            trim_start = max(0, self.scroll_x - keep_pixels)
-            
-            new_strip = self.headline_strip.crop((
-                trim_start, 0,
-                self.strip_width, Layout.HEADLINES_HEIGHT
-            ))
-            
-            # Update tracking variables
-            self.headline_strip = new_strip
-            self.strip_width = new_strip.width
-            self.scroll_x -= trim_start
-            
-            print(f"Trimmed headline strip: removed {trim_start} pixels")
+        block_count = len(self.blocks)
+        return f"{headline_count} headlines, {self.strip_width}px strip, {block_count} blocks, offset {self.scroll_x}"
 
 # Global scroller instance
 _headline_scroller: Optional[OptimizedHeadlineScroller] = None

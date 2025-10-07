@@ -2,10 +2,11 @@
 
 from typing import Optional, Tuple, Dict, Any
 from PIL import Image, ImageDraw
-from config import Layout, Colors, Fonts
+from config import Layout, Colors, Fonts, Weather as WeatherConfig
 from fonts.font_manager import get_font_manager, FontError
 from fonts.bitmap_font import BitmapFontAdapter, get_bitmap_font_manager
 from .headline_scroller import get_headline_scroller
+from display.weather_icons import draw_icon
 
 class OptimizedDisplayRenderer:
     """Optimized renderer using PIL compositing and SetImage for maximum performance"""
@@ -103,28 +104,53 @@ class OptimizedDisplayRenderer:
         draw = ImageDraw.Draw(image)
         
         # Horizontal dividers
-        # Date divider
+        # Date divider (full width)
         draw.rectangle(
             [0, Layout.DATE_DIVIDER_Y, 63, Layout.DATE_DIVIDER_Y + Layout.DATE_DIVIDER_HEIGHT - 1],
             fill=Colors.DIM_WHITE
         )
         
-        # Time divider
+        # Time divider (stops at x=52 to make room for icon box)
         draw.rectangle(
-            [0, Layout.TIME_DIVIDER_Y, 63, Layout.TIME_DIVIDER_Y + Layout.TIME_DIVIDER_HEIGHT - 1],
+            [0, Layout.TIME_DIVIDER_Y, Layout.TIME_DIVIDER_END_X, Layout.TIME_DIVIDER_Y + Layout.TIME_DIVIDER_HEIGHT - 1],
             fill=Colors.DIM_WHITE
         )
         
-        # Bottom divider
+        # Bottom divider (full width)
         draw.line(
             [(0, Layout.BOTTOM_DIVIDER_Y), (63, Layout.BOTTOM_DIVIDER_Y)],
             fill=Colors.DIM_WHITE
         )
         
-        # Vertical divider between weather and stocks
+        # Vertical divider between stocks and weather
         draw.rectangle(
             [Layout.VERTICAL_DIVIDER_X, Layout.VERTICAL_DIVIDER_START_Y,
              Layout.VERTICAL_DIVIDER_X + Layout.VERTICAL_DIVIDER_WIDTH - 1, Layout.VERTICAL_DIVIDER_END_Y],
+            fill=Colors.DIM_WHITE
+        )
+    
+    def draw_icon_box(self, image: Image.Image) -> None:
+        """
+        Draw the weather icon box on the right side
+        
+        Box consists of:
+        - Top horizontal line (1px)
+        - Left vertical line (1px) 
+        Right side is open (at edge of display)
+        """
+        draw = ImageDraw.Draw(image)
+        
+        # Top horizontal line (row 25, from x=53 to x=63)
+        draw.line(
+            [(Layout.ICON_BOX_X, Layout.ICON_BOX_Y), 
+             (Layout.ICON_BOX_X + Layout.ICON_BOX_WIDTH - 1, Layout.ICON_BOX_Y)],
+            fill=Colors.DIM_WHITE
+        )
+        
+        # Left vertical line (x=53, from row 25 to row 36)
+        draw.line(
+            [(Layout.ICON_BOX_X, Layout.ICON_BOX_Y), 
+             (Layout.ICON_BOX_X, Layout.TIME_DIVIDER_Y)],
             fill=Colors.DIM_WHITE
         )
     
@@ -155,77 +181,117 @@ class OptimizedDisplayRenderer:
         target.paste(colored_text, (x, y))
     
     def render_weather(self, frame: Image.Image, weather_data: Dict[str, Any]) -> None:
-            """Render weather information with color-coded temperatures"""
-            high_low_text = weather_data.get("high_low_text", "H-- L--")
-            current_text = weather_data.get("current_text", "Now --")
+        """Render weather information with color-coded temperatures"""
+        high_low_text = weather_data.get("high_low_text", "H-- L--")
+        current_text = weather_data.get("current_text", "Now --")
+        
+        # Use WEATHER_TEXT_X for starting position (now at x=34 on right side)
+        base_x = Layout.WEATHER_TEXT_X
+        
+        # Split high_low_text into parts: "H86 L57"
+        parts = high_low_text.split()
+        if len(parts) == 2:
+            high_part = parts[0]  # e.g., "H86"
+            low_part = parts[1]   # e.g., "L57"
             
-            # Split high_low_text into parts: "H86 L57"
-            parts = high_low_text.split()
-            if len(parts) == 2:
-                high_part = parts[0]  # e.g., "H86"
-                low_part = parts[1]   # e.g., "L57"
+            # Split "H86" into "H" and "86"
+            if len(high_part) > 1:
+                high_label = high_part[0]  # "H"
+                high_value = high_part[1:]  # "86"
                 
-                # Split "H86" into "H" and "86"
-                if len(high_part) > 1:
-                    high_label = high_part[0]  # "H"
-                    high_value = high_part[1:]  # "86"
-                    
-                    # Render "H" in white
-                    h_image = self.get_text_image(high_label, Fonts.TINY_FONT, f"weather_h_{high_label}")
-                    if h_image:
-                        self.paste_colored_text(frame, h_image, Layout.WEATHER_START_X, Layout.WEATHER_START_Y, Colors.WHITE)
-                    
-                    # Render "86" in orange, positioned after "H"
-                    high_value_image = self.get_text_image(high_value, Fonts.TINY_FONT, f"weather_high_{high_value}")
-                    if high_value_image and h_image:
-                        high_x = Layout.WEATHER_START_X + h_image.width + 1
-                        self.paste_colored_text(frame, high_value_image, high_x, Layout.WEATHER_START_Y, Colors.ORANGE)
+                # Render "H" in white
+                h_image = self.get_text_image(high_label, Fonts.TINY_FONT, f"weather_h_{high_label}")
+                if h_image:
+                    self.paste_colored_text(frame, h_image, base_x, Layout.WEATHER_START_Y, Colors.WHITE)
                 
-                # Split "L57" into "L" and "57"
-                if len(low_part) > 1:
-                    low_label = low_part[0]  # "L"
-                    low_value = low_part[1:]  # "57"
-                    
-                    # Render low value in blue
-                    low_value_image = self.get_text_image(low_value, Fonts.TINY_FONT, f"weather_low_{low_value}")
-                    if low_value_image:
-                        # Right align: divider is at x=31, we want 1 pixel gap, so end at x=30
-                        low_x = 30 - low_value_image.width
-                        self.paste_colored_text(frame, low_value_image, low_x, Layout.WEATHER_START_Y, Colors.BLUE)
-                        
-                        # Render "L" in white, positioned before the value
-                        l_image = self.get_text_image(low_label, Fonts.TINY_FONT, f"weather_l_{low_label}")
-                        if l_image:
-                            l_x = low_x - l_image.width - 1
-                            self.paste_colored_text(frame, l_image, l_x, Layout.WEATHER_START_Y, Colors.WHITE)
-            else:
-                # Fallback: render the whole string at start position
-                high_low_image = self.get_text_image(high_low_text, Fonts.TINY_FONT, f"weather_hl_{high_low_text}")
-                if high_low_image:
-                    self.paste_colored_text(frame, high_low_image, Layout.WEATHER_START_X, Layout.WEATHER_START_Y, Colors.BLUE)
+                # Render "86" in orange, positioned after "H"
+                high_value_image = self.get_text_image(high_value, Fonts.TINY_FONT, f"weather_high_{high_value}")
+                if high_value_image and h_image:
+                    high_x = base_x + h_image.width + 1
+                    self.paste_colored_text(frame, high_value_image, high_x, Layout.WEATHER_START_Y, Colors.ORANGE)
             
-            # Split current_text into "Now" and "##" parts
-            current_parts = current_text.split()
-            if len(current_parts) == 2:
-                now_label = current_parts[0]  # "Now"
-                now_value = current_parts[1]  # e.g., "85"
+            # Split "L57" into "L" and "57"
+            if len(low_part) > 1:
+                low_label = low_part[0]  # "L"
+                low_value = low_part[1:]  # "57"
                 
-                # Render "Now" label at start position in cyan
-                now_label_image = self.get_text_image(now_label, Fonts.TINY_FONT, f"weather_now_{now_label}")
-                if now_label_image:
-                    self.paste_colored_text(frame, now_label_image, Layout.WEATHER_START_X, Layout.WEATHER_START_Y + 7, Colors.WHITE)
-                
-                # Render temperature value flush right in cyan
-                now_value_image = self.get_text_image(now_value, Fonts.TINY_FONT, f"weather_value_{now_value}")
-                if now_value_image:
-                    # Right align: divider is at x=31, we want 1 pixel gap, so end at x=30
-                    value_x = 30 - now_value_image.width
-                    self.paste_colored_text(frame, now_value_image, value_x, Layout.WEATHER_START_Y + 7, Colors.CYAN)
-            else:
-                # Fallback: render the whole string at start position
-                current_image = self.get_text_image(current_text, Fonts.TINY_FONT, f"weather_cur_{current_text}")
-                if current_image:
-                    self.paste_colored_text(frame, current_image, Layout.WEATHER_START_X, Layout.WEATHER_START_Y + 7, Colors.CYAN)
+                # Render low value in blue - right aligned at x=62 (1px gap before right edge)
+                low_value_image = self.get_text_image(low_value, Fonts.TINY_FONT, f"weather_low_{low_value}")
+                if low_value_image:
+                    low_x = 62 - low_value_image.width
+                    self.paste_colored_text(frame, low_value_image, low_x, Layout.WEATHER_START_Y, Colors.BLUE)
+                    
+                    # Render "L" in white, positioned before the value
+                    l_image = self.get_text_image(low_label, Fonts.TINY_FONT, f"weather_l_{low_label}")
+                    if l_image:
+                        l_x = low_x - l_image.width - 1
+                        self.paste_colored_text(frame, l_image, l_x, Layout.WEATHER_START_Y, Colors.WHITE)
+        else:
+            # Fallback: render the whole string at start position
+            high_low_image = self.get_text_image(high_low_text, Fonts.TINY_FONT, f"weather_hl_{high_low_text}")
+            if high_low_image:
+                self.paste_colored_text(frame, high_low_image, base_x, Layout.WEATHER_START_Y, Colors.BLUE)
+        
+        # Split current_text into "Now" and "##" parts
+        current_parts = current_text.split()
+        if len(current_parts) == 2:
+            now_label = current_parts[0]  # "Now"
+            now_value = current_parts[1]  # e.g., "85"
+            
+            # Render "Now" label at start position in white
+            now_label_image = self.get_text_image(now_label, Fonts.TINY_FONT, f"weather_now_{now_label}")
+            if now_label_image:
+                self.paste_colored_text(frame, now_label_image, base_x, Layout.WEATHER_START_Y + 7, Colors.WHITE)
+            
+            # Render temperature value flush right in cyan at x=62
+            now_value_image = self.get_text_image(now_value, Fonts.TINY_FONT, f"weather_value_{now_value}")
+            if now_value_image:
+                value_x = 62 - now_value_image.width
+                self.paste_colored_text(frame, now_value_image, value_x, Layout.WEATHER_START_Y + 7, Colors.CYAN)
+        else:
+            # Fallback: render the whole string at start position
+            current_image = self.get_text_image(current_text, Fonts.TINY_FONT, f"weather_cur_{current_text}")
+            if current_image:
+                self.paste_colored_text(frame, current_image, base_x, Layout.WEATHER_START_Y + 7, Colors.CYAN)
+    
+    def render_stocks(self, frame: Image.Image, stock_data: Dict[str, Any]) -> None:
+        """Render stock information with right-aligned values"""
+        # Get labels and values separately
+        dow_label = stock_data.get("dow_label", "DOW")
+        dow_value = stock_data.get("dow_value", "0")
+        sp_label = stock_data.get("sp_label", "S&P")
+        sp_value = stock_data.get("sp_value", "0")
+        
+        # Use green for positive, red for negative changes
+        dow_change = stock_data.get("dow_change", 0)
+        sp_change = stock_data.get("sp_change", 0)
+        
+        dow_color = Colors.GREEN if dow_change >= 0 else Colors.RED
+        sp_color = Colors.GREEN if sp_change >= 0 else Colors.RED
+        
+        # Render DOW - now on LEFT side
+        dow_label_image = self.get_text_image(dow_label, Fonts.TINY_FONT, f"dow_label_{dow_label}")
+        if dow_label_image:
+            # Label starts at STOCKS_START_X (x=1)
+            self.paste_colored_text(frame, dow_label_image, Layout.STOCKS_START_X, Layout.STOCKS_START_Y, Colors.WHITE)
+        
+        dow_value_image = self.get_text_image(dow_value, Fonts.TINY_FONT, f"dow_value_{dow_value}")
+        if dow_value_image:
+            # Value is right-aligned at x=30 (1px gap before vertical divider at x=31)
+            value_x = 30 - dow_value_image.width
+            self.paste_colored_text(frame, dow_value_image, value_x, Layout.STOCKS_START_Y, dow_color)
+        
+        # Render S&P - now on LEFT side
+        sp_label_image = self.get_text_image(sp_label, Fonts.TINY_FONT, f"sp_label_{sp_label}")
+        if sp_label_image:
+            # Label starts at STOCKS_START_X (x=1)
+            self.paste_colored_text(frame, sp_label_image, Layout.STOCKS_START_X, Layout.STOCKS_START_Y + 7, Colors.WHITE)
+        
+        sp_value_image = self.get_text_image(sp_value, Fonts.TINY_FONT, f"sp_value_{sp_value}")
+        if sp_value_image:
+            # Value is right-aligned at x=30 (1px gap before vertical divider at x=31)
+            value_x = 30 - sp_value_image.width
+            self.paste_colored_text(frame, sp_value_image, value_x, Layout.STOCKS_START_Y + 7, sp_color)
 
     def rebuild_static_frame_buffer(self, time_data: Dict[str, Any], 
                                    weather_data: Dict[str, Any], 
@@ -243,6 +309,15 @@ class OptimizedDisplayRenderer:
         
         # Draw dividers first
         self.draw_dividers(frame)
+        
+        # Draw icon box
+        self.draw_icon_box(frame)
+        
+        # Draw weather icon if enabled
+        if WeatherConfig.SHOW_ICON:
+            condition = weather_data.get("condition", "cloudy")
+            is_night = weather_data.get("is_night", False)
+            draw_icon(frame, Layout.WEATHER_ICON_X, Layout.WEATHER_ICON_Y, condition, is_night)
         
         # Render date
         date_text = time_data.get('date', '')
@@ -266,11 +341,11 @@ class OptimizedDisplayRenderer:
             if ampm_image:
                 self.paste_colored_text(frame, ampm_image, Layout.AMPM_START_X, Layout.AMPM_START_Y, Colors.RED)
         
-        # Render weather with new right-aligned method
-        self.render_weather(frame, weather_data)
-        
-        # Render stocks with separate labels and values
+        # Render stocks (now on left side)
         self.render_stocks(frame, stock_data)
+        
+        # Render weather (now on right side)
+        self.render_weather(frame, weather_data)
         
         # Store the static buffer
         self.static_frame_buffer = frame
@@ -282,45 +357,6 @@ class OptimizedDisplayRenderer:
         self.last_ampm = ampm_text
         self.last_weather_data = weather_data
         self.last_stock_data = stock_data
-    
-    def render_stocks(self, frame: Image.Image, stock_data: Dict[str, Any]) -> None:
-        """Render stock information with right-aligned values"""
-        # Get labels and values separately
-        dow_label = stock_data.get("dow_label", "DOW")
-        dow_value = stock_data.get("dow_value", "0")
-        sp_label = stock_data.get("sp_label", "S&P")
-        sp_value = stock_data.get("sp_value", "0")
-        
-        # Use green for positive, red for negative changes
-        dow_change = stock_data.get("dow_change", 0)
-        sp_change = stock_data.get("sp_change", 0)
-        
-        dow_color = Colors.GREEN if dow_change >= 0 else Colors.RED
-        sp_color = Colors.GREEN if sp_change >= 0 else Colors.RED
-        
-        # Render DOW
-        dow_label_image = self.get_text_image(dow_label, Fonts.TINY_FONT, f"dow_label_{dow_label}")
-        if dow_label_image:
-            # Label starts at STOCKS_START_X
-            self.paste_colored_text(frame, dow_label_image, Layout.STOCKS_START_X, Layout.STOCKS_START_Y, Colors.WHITE)
-        
-        dow_value_image = self.get_text_image(dow_value, Fonts.TINY_FONT, f"dow_value_{dow_value}")
-        if dow_value_image:
-            # Value is right-aligned at pixel 62
-            value_x = 62 - dow_value_image.width
-            self.paste_colored_text(frame, dow_value_image, value_x, Layout.STOCKS_START_Y, dow_color)
-        
-        # Render S&P
-        sp_label_image = self.get_text_image(sp_label, Fonts.TINY_FONT, f"sp_label_{sp_label}")
-        if sp_label_image:
-            # Label starts at STOCKS_START_X
-            self.paste_colored_text(frame, sp_label_image, Layout.STOCKS_START_X, Layout.STOCKS_START_Y + 7, Colors.WHITE)
-        
-        sp_value_image = self.get_text_image(sp_value, Fonts.TINY_FONT, f"sp_value_{sp_value}")
-        if sp_value_image:
-            # Value is right-aligned at pixel 62
-            value_x = 62 - sp_value_image.width
-            self.paste_colored_text(frame, sp_value_image, value_x, Layout.STOCKS_START_Y + 7, sp_color)
     
     def check_static_content_changed(self, time_data: Dict[str, Any], 
                                     weather_data: Dict[str, Any], 
@@ -352,9 +388,9 @@ class OptimizedDisplayRenderer:
         return False
     
     def render_frame_as_image(self, time_data: Dict[str, Any], 
-                             weather_data: Dict[str, Any], 
-                             stock_data: Dict[str, Any],
-                             news_data: Dict[str, Any]) -> Image.Image:
+                            weather_data: Dict[str, Any], 
+                            stock_data: Dict[str, Any],
+                            news_data: Dict[str, Any]) -> Image.Image:
         """
         Render a complete frame as a PIL Image
         
@@ -370,6 +406,20 @@ class OptimizedDisplayRenderer:
         # Check if static content needs rebuilding
         if self.check_static_content_changed(time_data, weather_data, stock_data):
             self.rebuild_static_frame_buffer(time_data, weather_data, stock_data)
+            
+            # Prune image cache when static content changes
+            # This happens every minute (when time changes), so cache won't grow unbounded
+            cache_size = len(self._image_cache)
+            if cache_size > 200:
+                # Keep only the 100 most recently accessed entries
+                # Since dicts maintain insertion order in Python 3.7+, keep the last 100
+                keys_to_keep = list(self._image_cache.keys())[-100:]
+                new_cache = {k: self._image_cache[k] for k in keys_to_keep}
+                
+                removed_count = cache_size - len(new_cache)
+                self._image_cache = new_cache
+                
+                print(f"Image cache pruned: removed {removed_count} entries, kept {len(new_cache)}")
         
         # Copy static buffer
         if self.static_frame_buffer:

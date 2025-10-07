@@ -139,6 +139,11 @@ class LEDClock:
             while self.running:
                 loop_count += 1
                 self.frame_count += 1
+                # Add to main.py in the main loop every 125 iterations:
+                if loop_count % 125 == 0:
+                    info = self.renderer.headline_scroller.get_current_headline_info()
+                    # print(f"Headlines: {info}")
+                                    
                 current_time = time.time()
                 
                 # Get all current data (non-blocking, uses cached data)
