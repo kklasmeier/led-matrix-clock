@@ -88,7 +88,6 @@ class WeatherProvider:
             Category string: 'clear', 'partly_cloudy', 'cloudy', 'rain', 
                            'thunderstorm', 'snow', 'fog', 'freezing_rain', 'heavy_rain'
         """
-         
         if code == 0:
             return 'clear'
         elif code in [1, 2]:
