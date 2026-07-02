@@ -65,12 +65,12 @@ class WeatherProvider:
         self.cached_data = {}
         self.update_interval = 900  # 15 minutes
         
-        # Build API URL - now includes hourly weather codes
+        # Build API URL - now includes hourly weather codes and sunrise/sunset
         self.api_url = (
             f"https://api.open-meteo.com/v1/forecast"
             f"?latitude={self.latitude}&longitude={self.longitude}"
             f"&current_weather=true"
-            f"&daily=temperature_2m_max,temperature_2m_min"
+            f"&daily=temperature_2m_max,temperature_2m_min,sunrise,sunset"
             f"&hourly=weather_code"
             f"&timezone=auto"
             f"&temperature_unit=fahrenheit"
@@ -151,7 +151,7 @@ class WeatherProvider:
         
         # Return category with highest weighted score
         if category_scores:
-            return max(category_scores, key=category_scores.get)
+            return max(category_scores, key=lambda k: category_scores[k])
         else:
             return 'cloudy'  # fallback
     
@@ -159,8 +159,8 @@ class WeatherProvider:
         """
         Determine if it's currently nighttime
         
-        Uses simple time-based heuristic from config.Weather settings
-        For more accuracy, could use sunrise/sunset times from API
+        Uses sunrise/sunset times from API when available,
+        or falls back to simple time-based heuristic
         
         Returns:
             True if nighttime, False if daytime
@@ -169,24 +169,37 @@ class WeatherProvider:
             from config import Weather as WeatherConfig
             method = WeatherConfig.DAY_NIGHT_METHOD
             
-            if method == 'simple':
+            if method == 'api' and 'sunrise' in self.cached_data and 'sunset' in self.cached_data:
+                # Use actual sunrise/sunset times from API
                 now = datetime.now()
-                hour = now.hour
-                night_start = WeatherConfig.SIMPLE_NIGHT_START
-                night_end = WeatherConfig.SIMPLE_NIGHT_END
+                sunrise = self.cached_data['sunrise']
+                sunset = self.cached_data['sunset']
                 
-                # Handle wraparound (e.g., 20:00 to 6:00)
-                if night_start > night_end:
-                    return hour >= night_start or hour < night_end
-                else:
-                    return night_start <= hour < night_end
+                # Make sure we're comparing aware or naive datetimes consistently
+                # If sunrise/sunset are aware, make now aware too
+                if sunrise.tzinfo is not None and now.tzinfo is None:
+                    # Sunrise has timezone, convert now to same timezone
+                    now = now.replace(tzinfo=sunrise.tzinfo)
+                elif sunrise.tzinfo is None and now.tzinfo is not None:
+                    # Make both naive
+                    now = now.replace(tzinfo=None)
+                
+                # Night if before sunrise or after sunset
+                return now < sunrise or now > sunset
+            
+            # Fall back to simple method
+            now = datetime.now()
+            hour = now.hour
+            night_start = WeatherConfig.SIMPLE_NIGHT_START
+            night_end = WeatherConfig.SIMPLE_NIGHT_END
+            
+            # Handle wraparound (e.g., 20:00 to 6:00)
+            if night_start > night_end:
+                return hour >= night_start or hour < night_end
             else:
-                # 'api' method would use sunrise/sunset from cached_data
-                # For now, fall back to simple check
-                hour = datetime.now().hour
-                return hour >= 20 or hour < 6
+                return night_start <= hour < night_end
                 
-        except (ImportError, AttributeError):
+        except (ImportError, AttributeError, KeyError):
             # Fallback: simple 8pm-6am check
             hour = datetime.now().hour
             return hour >= 20 or hour < 6
@@ -207,6 +220,15 @@ class WeatherProvider:
             high_temp = int(round(data["daily"]["temperature_2m_max"][0]))
             low_temp = int(round(data["daily"]["temperature_2m_min"][0]))
             
+            # Extract sunrise and sunset times (ISO format strings)
+            sunrise_str = data["daily"]["sunrise"][0]  # e.g., "2025-10-09T07:15"
+            sunset_str = data["daily"]["sunset"][0]    # e.g., "2025-10-09T18:45"
+            
+            # Parse sunrise/sunset to datetime objects
+            from datetime import datetime
+            sunrise = datetime.fromisoformat(sunrise_str)
+            sunset = datetime.fromisoformat(sunset_str)
+            
             # Extract current and hourly weather codes
             current_code = data["current_weather"]["weathercode"]
             hourly_codes = data["hourly"]["weather_code"][:8]  # Next 8 hours
@@ -222,7 +244,10 @@ class WeatherProvider:
             
             # Print forecast icon selection for debugging
             day_night = "night" if is_night else "day"
+            sunrise_time = sunrise.strftime("%H:%M")
+            sunset_time = sunset.strftime("%H:%M")
             print(f"Weather updated: Icon='{forecast_condition}' ({day_night}) | Current code: {current_code} | Next 8hrs: {hourly_codes}")
+            print(f"  Sunrise: {sunrise_time} | Sunset: {sunset_time}")
             
             return {
                 "current": current_temp,
@@ -232,6 +257,8 @@ class WeatherProvider:
                 "is_night": is_night,
                 "current_code": current_code,
                 "hourly_codes": hourly_codes,
+                "sunrise": sunrise,
+                "sunset": sunset,
                 "timestamp": time.time()
             }
             
@@ -256,6 +283,11 @@ class WeatherProvider:
                 self.last_update = current_time
             elif not self.cached_data:
                 # If no cached data and API fails, return default
+                # Use current time +/- some hours for default sunrise/sunset
+                now = datetime.now()
+                default_sunrise = now.replace(hour=6, minute=30, second=0, microsecond=0)
+                default_sunset = now.replace(hour=19, minute=0, second=0, microsecond=0)
+                
                 self.cached_data = {
                     "current": 70,
                     "high": 75,
@@ -264,6 +296,8 @@ class WeatherProvider:
                     "is_night": self.is_nighttime(),
                     "current_code": 3,
                     "hourly_codes": [3] * 8,
+                    "sunrise": default_sunrise,
+                    "sunset": default_sunset,
                     "timestamp": current_time
                 }
         
@@ -281,6 +315,10 @@ class WeatherProvider:
             # Icon information
             "condition": self.cached_data["condition"],
             "is_night": self.cached_data["is_night"],
+            
+            # Sunrise/sunset times (datetime objects)
+            "sunrise": self.cached_data.get("sunrise"),
+            "sunset": self.cached_data.get("sunset"),
             
             # Debug/raw data
             "current_code": self.cached_data.get("current_code", 0),

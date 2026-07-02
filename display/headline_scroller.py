@@ -139,6 +139,20 @@ class OptimizedHeadlineScroller:
         
         print(f"Built headline strip: {len(headlines)} headlines, {total_width} pixels wide (Block 0)")
     
+    def set_headlines(self, headlines: List[str]) -> None:
+        """Replace all headlines (e.g. WiFi status carousel)."""
+        if not headlines:
+            return
+
+        headlines_hash = self._calculate_headlines_hash(headlines)
+        if headlines_hash == self.last_headlines_hash:
+            return
+
+        self.blocks = []
+        self.scroll_x = 0
+        self._build_headline_strip(headlines)
+        self.last_headlines_hash = headlines_hash
+
     def update_headlines(self, headlines: List[str]) -> None:
         """
         Update headlines with seamless transition

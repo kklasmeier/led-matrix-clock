@@ -40,12 +40,15 @@ class MatrixDisplay:
             options.gpio_slowdown = Hardware.GPIO_SLOWDOWN
             options.pwm_bits = Hardware.PWM_BITS
             options.brightness = Hardware.BRIGHTNESS
+            options.scan_mode = 1  # 64x64 panel with E-line on GPIO 8
             
             # Quality settings for better display
             options.hardware_mapping = 'adafruit-hat-pwm'  # For Adafruit RGB Matrix Bonnet
             options.pwm_lsb_nanoseconds = 130
             options.led_rgb_sequence = 'RGB'
             options.disable_hardware_pulsing = True
+            if Hardware.LIMIT_REFRESH_RATE_HZ > 0:
+                options.limit_refresh_rate_hz = Hardware.LIMIT_REFRESH_RATE_HZ
             
             # Create the matrix
             self.matrix = RGBMatrix(options=options)

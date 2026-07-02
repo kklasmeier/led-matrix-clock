@@ -146,6 +146,7 @@ class Hardware:
     GPIO_SLOWDOWN = 4    # Adjust if display flickers
     PWM_BITS = 11        # Color depth
     BRIGHTNESS = 100     # LED brightness (0-100)
+    LIMIT_REFRESH_RATE_HZ = 0  # 0 = unlimited; try 100 if scroll text ghosts
     
     # HUB75 pin configuration (for Adafruit RGB Matrix Bonnet)
     # These are typically handled by the library, but can be customized

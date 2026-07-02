@@ -82,7 +82,13 @@ def test_setimage():
         for y in range(64):
             for x in range(64):
                 pixel = test_image.getpixel((x, y))
-                canvas.SetPixel(x, y, pixel[0], pixel[1], pixel[2])
+                if isinstance(pixel, tuple) and len(pixel) >= 3:
+                    r, g, b = pixel[:3]
+                elif isinstance(pixel, int) or isinstance(pixel, float):
+                    r = g = b = int(pixel)
+                else:
+                    r = g = b = 0
+                canvas.SetPixel(x, y, r, g, b)
         
         elapsed = time.time() - start_time
         print(f"  SetPixel for full frame: {elapsed*1000:.2f}ms")

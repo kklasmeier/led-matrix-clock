@@ -10,6 +10,14 @@ from data.data_manager import get_data_manager
 from display.matrix import get_matrix_display, cleanup_matrix
 from display.renderer import get_display_renderer
 from utils.process_lock import get_process_lock
+from utils.wifi_status import (
+    is_wifi_connected,
+    get_wifi_status_headlines,
+    get_active_wifi_name,
+    refresh_wifi_status,
+    start_wifi_monitor,
+    stop_wifi_monitor,
+)
 
 class LEDClock:
     """Main LED Clock application with threaded data management"""
@@ -25,6 +33,7 @@ class LEDClock:
         self.last_weather_data = None
         self.last_stock_data = None
         self.last_news_data = None
+        self.wifi_was_connected = is_wifi_connected()
         
         # Frame-based scroll timing
         self.frame_count = 0
@@ -120,6 +129,8 @@ class LEDClock:
         
         print("Starting LED Clock...")
         print("Starting background data manager...")
+
+        start_wifi_monitor()
         
         # Start background data fetching
         self.data_manager.start()
@@ -153,6 +164,21 @@ class LEDClock:
                 weather_data = all_data['weather']
                 stock_data = all_data['stocks']
                 news_data = all_data['news']
+
+                wifi_connected = is_wifi_connected()
+                if not wifi_connected:
+                    wifi_headlines = get_wifi_status_headlines()
+                    news_data = {
+                        "headlines": wifi_headlines,
+                        "count": len(wifi_headlines),
+                        "replace_headlines": True,
+                    }
+                elif not self.wifi_was_connected:
+                    refresh_wifi_status()
+                    ssid = get_active_wifi_name() or "WiFi"
+                    print(f"WiFi connected ({ssid}) — resuming news headlines")
+                    self.renderer.headline_scroller.last_headlines_hash = None
+                self.wifi_was_connected = wifi_connected
                 
                 # Frame-based scroll timing - simple and predictable
                 should_scroll = (self.frame_count % self.scroll_every_n_frames == 0)
@@ -197,6 +223,7 @@ class LEDClock:
         print("Cleaning up...")
         
         # Stop background threads
+        stop_wifi_monitor()
         self.data_manager.stop()
         
         # Clean up display

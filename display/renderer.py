@@ -430,7 +430,10 @@ class OptimizedDisplayRenderer:
         # Update headlines in scroller if changed
         headlines = news_data.get("headlines", [])
         if headlines:
-            self.headline_scroller.update_headlines(headlines)
+            if news_data.get("replace_headlines"):
+                self.headline_scroller.set_headlines(headlines)
+            else:
+                self.headline_scroller.update_headlines(headlines)
         
         # Get current headline slice
         headline_slice = self.headline_scroller.get_display_slice()
@@ -461,8 +464,8 @@ class OptimizedDisplayRenderer:
         # Generate complete frame as PIL image
         frame_image = self.render_frame_as_image(time_data, weather_data, stock_data, news_data)
         
-        # Use SetImage for fast bulk transfer
-        canvas.SetImage(frame_image)
+        # Fast bulk transfer; rgbmatrix 0.0.1+ uses image.getim() (Pillow 11 safe)
+        canvas.SetImage(frame_image.convert('RGB'), unsafe=True)
     
     def clear_cache(self) -> None:
         """Clear the image cache and reset static buffer"""
